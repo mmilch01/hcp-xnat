@@ -17,6 +17,7 @@ function print_usage
     echo "  --workdir       <path>          processing directory"
     echo "  --stage         <1|2>           stage 1 (default): minimal structural and functional, ICA-FIX; stage 2: reapply FIX, MSMAll"
     echo "  --rerun         <0|1>           set to 1 to rerun the analysis (skip copying from --scans_dir). Default: 0"
+    echo "  --xnat_input_dir <0|1>          set to 1 if input scans are in XNAT format (DICOMs in subfolders named by scan number). Default: 0"
 }
 
 source "/opt/qunex/env/qunex_environment.sh" &> /dev/null
@@ -51,6 +52,7 @@ fi
 
 stage=1
 rerun=0
+xnat_input_dir=0
 while [ -n "$1" ]; do
     echo input: $1
     case $1 in
@@ -61,6 +63,7 @@ while [ -n "$1" ]; do
         --workdir)      shift; workdir="$1"; shift;;
         --stage)       shift; stage="$1"; shift;;
         --rerun)	shift; rerun="$1"; shift;;
+        --xnat_input_dir) shift; xnat_input_dir="$1"; shift;;
         --help) print_usage; exit 0;;
         *)      exit_with_error "unrecognized option: $1";;
     esac
@@ -77,25 +80,37 @@ cd $workdir
 scans=($T1w $T2w ${fstda[@]} $fieldmap_mag $fieldmap_ph)
 
 echo "Preparing Qunex study in $workdir/qunex for session $session"
-$qunex_cmd create_study --studyfolder=$wordkir/qunex
+$qunex_cmd create_study --studyfolder=$workdir/qunex
 sessionsfolder=$workdir/qunex/sessions
 
-if (( rerun == 0 )); then 
-	echo "Linking scans from $scans_dir to session folder"
-	for scan in ${scans[@]}; do
-	    mkdir -p $sessionsfolder/inbox/MR/$scan
-	    ln -s $scans_dir/$scan/DICOM $sessionsfolder/inbox/MR/$scan/DICOM
-	done
+#always rerun if stage>1
+if (( stage > 1 )); then
+    if (( rerun == 0 )); then 
+        echo "WARNING: Forcing --rerun 1 since --stage > 1"
+    fi
+    rerun=1
 fi
 
-echo "Importing DICOMs into HCP session"
-"$qunex_cmd" import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
+if (( rerun == 0 )); then 
+    echo "Linking scans from $scans_dir to session folder"
+    if (( xnat_input_dir == 0 )); then 
+        ln -s $scans_dir $sessionsfolder/inbox/MR
+    else 
+        for scan in ${scans[@]}; do
+            mkdir -p $sessionsfolder/inbox/MR/$scan
+            ln -s $scans_dir/$scan/DICOM $sessionsfolder/inbox/MR/$scan/DICOM
+        done
+    fi
+    echo "Importing DICOMs into HCP session"
+    "$qunex_cmd" import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
+fi
+
 mapfile=$sessionsfolder/specs/hcp_mapping.txt
-echo "$T1w => T1w" >> $mapfile
+echo "$T1w => T1w" > $mapfile
 if [ -n "${T2w:-}" ]; then echo "$T2w => T2w" >> $mapfile; fi
-for i in ${!fstda[@]}; do echo "${fstda[i]} => rfMRI_REST${i}" >> $mapfile; done
-if [ -n "${fieldmap_mag:-}" ]; then echo "$fieldmap_mag => fMRI_fieldmap_mag" >> $mapfile; fi
-if [ -n "${fieldmap_ph:-}" ]; then echo "$fieldmap_ph => fMRI_fieldmap_ph" >> $mapfile; fi
+for i in ${!fstda[@]}; do echo "${fstda[i]} => bold:rest" >> $mapfile; done
+if [ -n "${fieldmap_mag:-}" ]; then echo "$fieldmap_mag => FM-Magnitude" >> $mapfile; fi
+if [ -n "${fieldmap_ph:-}" ]; then echo "$fieldmap_ph => FM-Phase" >> $mapfile; fi
 
 cat $mapfile
 
