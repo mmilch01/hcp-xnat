@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -euo pipefail
-
 function exit_with_error
 {
     echo "run_hcp_xnat ERROR: $1"; exit -1
@@ -10,7 +8,7 @@ function exit_with_error
 function print_usage
 {
     echo "run HCP pipelines in Qunex as a single, self-contained script, using XNAT data mount at experiment level"
-    echo "usage: run_hcp_xnat <session> <T1w scan> <BOLD scan>[,<BOLD scan>[,...]] --scans_dir <path> --workdir <path> [options]"
+    echo "usage: run_hcp_xnat <session> <T1w scan> <BOLD scan>[,<BOLD scan>[,...]] <--scans_dir <path>>|<--rerun 1> --workdir <path> [options]"
     echo "options:"
     echo "  --T2w           <scan_no>       T2w scan number" 
     echo "  --fieldmap_mag  <scan_no>       fieldmap magnitude scan number"
@@ -18,9 +16,10 @@ function print_usage
     echo "  --scans_dir     <path>          input directory containing MRI scans"
     echo "  --workdir       <path>          processing directory"
     echo "  --stage         <1|2>           stage 1 (default): minimal structural and functional, ICA-FIX; stage 2: reapply FIX, MSMAll"
+    echo "  --rerun         <0|1>           set to 1 to rerun the analysis (skip copying from --scans_dir). Default: 0"
 }
 
-source "/opt/qunex/qunex_environment.sh"
+source "/opt/qunex/env/qunex_environment.sh" &> /dev/null
 qunex_cmd="/opt/qunex/bin/qunex.sh"
 
 if [ "$#" -lt 7 ]; then
@@ -30,49 +29,75 @@ fi
 
 session=$1; shift
 T1w=$1; shift
-IFS=', ' read -r -a tt <<< "$1"; shift
-j=0; for i in ${!tt[*]}; do if [ -n "${tt[i]}" ]; then fstda[j]=${tt[i]}; ((j++)); fi; done
 
-if [[ ${#fstda[@]} -eq 0 ]]; then exit_with_error "at least one BOLD scan number must be provided"; fi
+IFS=',' read -r -a tt <<< "$1"; shift
+j=0
+fstda=()
+
+echo tt:${tt[*]}
+
+for i in "${!tt[@]}"; do 
+	if [ -n "${tt[i]}" ]; then 
+		fstda[j]=${tt[i]} 
+		j=$(( j+1 ))
+	fi
+	echo $i
+done
+
+
+if [[ ${#fstda[@]} -eq 0 ]]; then
+	exit_with_error "at least one BOLD scan number must be provided"
+fi
 
 stage=1
+rerun=0
 while [ -n "$1" ]; do
+    echo input: $1
     case $1 in
         --T2w)  shift; T2w=$1; shift;;
-        --fieldmap_mag) shift; fieldmap_mag=$1; shift;;
-        --fieldmap_ph)  shift; fieldmap_ph=$1; shift;;
-        --scans_dir)    shift; scans_dir=$1; shift;;
-        --workdir)      shift; workdir=$1; shift;;
-        --stage)       shift; stage=$1; shift;;
+        --fieldmap_mag) shift; fieldmap_mag="$1"; shift;;
+        --fieldmap_ph)  shift; fieldmap_ph="$1"; shift;;
+        --scans_dir)    shift; scans_dir="$1"; shift;;
+        --workdir)      shift; workdir="$1"; shift;;
+        --stage)       shift; stage="$1"; shift;;
+        --rerun)	shift; rerun="$1"; shift;;
         --help) print_usage; exit 0;;
         *)      exit_with_error "unrecognized option: $1";;
     esac
 done
 
-if [ ! -d "$scans_dir" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided"; fi
+echo "rerun: $rerun"
+
+if [ ! -d "$scans_dir" -a "$rerun" == "0" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided if rerun==0"; fi
 if [ ! -d "$workdir" ]; then exit_with_error "valid directory --workdir <path> must be provided"; fi
 if ((stage != 1 && stage != 2)); then exit_with_error "--stage must be 1 or 2"; fi
 
-mkdir -p $workdir/$session
+#mkdir -p $workdir/$session
 cd $workdir
 scans=($T1w $T2w ${fstda[@]} $fieldmap_mag $fieldmap_ph)
 
 echo "Preparing Qunex study in $workdir/qunex for session $session"
 $qunex_cmd create_study --studyfolder=$wordkir/qunex
 sessionsfolder=$workdir/qunex/sessions
-echo "Linking scans from $scans_dir to session folder"
-for scan in ${scans[@]}; do
-    mkdir -p $sessionsfolder/inbox/MR/$scan
-    ln -s $scans_dir/$scan/DICOM $sessionsfolder/inbox/MR/$scan/DICOM
-done
+
+if (( rerun == 0 )); then 
+	echo "Linking scans from $scans_dir to session folder"
+	for scan in ${scans[@]}; do
+	    mkdir -p $sessionsfolder/inbox/MR/$scan
+	    ln -s $scans_dir/$scan/DICOM $sessionsfolder/inbox/MR/$scan/DICOM
+	done
+fi
+
 echo "Importing DICOMs into HCP session"
-$qunex_cmd import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
+"$qunex_cmd" import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
 mapfile=$sessionsfolder/specs/hcp_mapping.txt
 echo "$T1w => T1w" >> $mapfile
 if [ -n "${T2w:-}" ]; then echo "$T2w => T2w" >> $mapfile; fi
 for i in ${!fstda[@]}; do echo "${fstda[i]} => rfMRI_REST${i}" >> $mapfile; done
 if [ -n "${fieldmap_mag:-}" ]; then echo "$fieldmap_mag => fMRI_fieldmap_mag" >> $mapfile; fi
 if [ -n "${fieldmap_ph:-}" ]; then echo "$fieldmap_ph => fMRI_fieldmap_ph" >> $mapfile; fi
+
+cat $mapfile
 
 if ((stage == 1)); then 
     echo "Creating session info"
