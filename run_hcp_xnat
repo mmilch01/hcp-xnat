@@ -112,7 +112,7 @@ if (( rerun == 0 )); then
             cp -r $scans_dir/$scan/* $sessionsfolder/inbox/MR/$session/$scan/            
         done
         #remove catalog *.xml files from copied folders. If not done, this will break XNAT catalog generation. 
-        rm -rf $sessionsfolder/inbox/MR/$session/*/DICOM/*.xml
+        find $sessionsfolder/inbox/MR/$session/  -name *.xml -exec rm -f {} \;        
 
     else #no downstream XNAT processing is expected
         mkdir -p $sessionsfolder/inbox/MR
