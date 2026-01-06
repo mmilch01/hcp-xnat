@@ -53,6 +53,7 @@ fi
 stage=1
 rerun=0
 xnat_input_dir=0
+args="$@"
 while [ -n "$1" ]; do
     echo input: $1
     case $1 in
@@ -73,14 +74,19 @@ echo "rerun: $rerun"
 
 if [ ! -d "$scans_dir" -a "$rerun" == "0" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided if rerun==0"; fi
 if [ ! -d "$workdir" ]; then exit_with_error "valid directory --workdir <path> must be provided"; fi
-if ((stage != 1 && stage != 2)); then exit_with_error "--stage must be 1 or 2"; fi
+if [ "$stage" != "1" -a "$stage" != "2" -a "$stage" != "DEBUG1"  -a "$stage" != "DEBUG2"  -a "$stage" != "DEBUG3" ]; then exit_with_error "--stage must be 1 or 2 or DEBUG1 or DEBUG2 or DEBUG3"; fi
 
 #mkdir -p $workdir/$session
 cd $workdir
+
+if [ "$stage" == "DEBUG1" ]; then
+    echo "$args" > debug_args.txt
+    echo "DEBUG1: initialized variables"
+    exit 0
+fi
+
 scans=($T1w $T2w ${fstda[@]} $fieldmap_mag $fieldmap_ph)
 
-echo "Preparing Qunex study in $workdir/qunex for session $session"
-$qunex_cmd create_study --studyfolder=$workdir/qunex
 sessionsfolder=$workdir/qunex/sessions
 
 #always rerun if stage>1
@@ -92,29 +98,51 @@ if (( stage > 1 )); then
 fi
 
 if (( rerun == 0 )); then 
+
+    echo "Preparing Qunex study in $workdir/qunex for session $session"
+    $qunex_cmd create_study --studyfolder=$workdir/qunex
     echo "Linking scans from $scans_dir to session folder"
-    if (( xnat_input_dir == 0 )); then 
-        ln -s $scans_dir $sessionsfolder/inbox/MR
-    else 
-        for scan in ${scans[@]}; do
-            mkdir -p $sessionsfolder/inbox/MR/$scan
-            ln -s $scans_dir/$scan/DICOM $sessionsfolder/inbox/MR/$scan/DICOM
+
+    #files are copied, to avoid symlinks in container.
+    if (( xnat_input_dir == 1 )); then
+        mkdir -p $sessionsfolder/inbox/MR/$session
+        for scan in "${scans[@]}"; do
+            #copying individual scan folders
+            mkdir -p $sessionsfolder/inbox/MR/$session/$scan
+            cp -r $scans_dir/$scan/* $sessionsfolder/inbox/MR/$session/$scan/            
         done
+        #remove catalog *.xml files from copied folders. If not done, this will break XNAT catalog generation. 
+        rm -rf $sessionsfolder/inbox/MR/$session/*/DICOM/*.xml
+
+    else #no downstream XNAT processing is expected
+        mkdir -p $sessionsfolder/inbox/MR
+        ln -s $scans_dir $sessionsfolder/inbox/MR/$session
+    fi
+
+    if [ "$stage" == "DEBUG2" ]; then
+        echo "DEBUG2: copied scans"
+        exit 0
     fi
     echo "Importing DICOMs into HCP session"
     "$qunex_cmd" import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
 fi
 
 mapfile=$sessionsfolder/specs/hcp_mapping.txt
-echo "$T1w => T1w" > $mapfile
-if [ -n "${T2w:-}" ]; then echo "$T2w => T2w" >> $mapfile; fi
-for i in ${!fstda[@]}; do echo "${fstda[i]} => bold:rest" >> $mapfile; done
-if [ -n "${fieldmap_mag:-}" ]; then echo "$fieldmap_mag => FM-Magnitude" >> $mapfile; fi
-if [ -n "${fieldmap_ph:-}" ]; then echo "$fieldmap_ph => FM-Phase" >> $mapfile; fi
 
-cat $mapfile
+if [ "$stage" == "DEBUG3" ]; then
+    echo "DEBUG3: Created directory structure, imported DICOMs, exiting before running HCP pipelines"
+    exit 0
+fi
 
 if ((stage == 1)); then 
+
+    echo "${T1w}1 => T1w" > $mapfile
+    if [ -n "${T2w:-}" ]; then echo "${T2w}1 => T2w" >> $mapfile; fi
+    for i in ${!fstda[@]}; do echo "${fstda[i]}1 => bold:rest" >> $mapfile; done
+    if [ -n "${fieldmap_mag:-}" ]; then echo "${fieldmap_mag}1 => FM-Magnitude" >> $mapfile; fi
+    if [ -n "${fieldmap_ph:-}" ]; then echo "${fieldmap_ph}1 => FM-Phase" >> $mapfile; fi
+    cat $mapfile
+
     echo "Creating session info"
     $qunex_cmd create_session_info --sessionsfolder="$sessionsfolder" --overwrite="yes"
 

@@ -1,46 +1,61 @@
 {
-  "name": "hcp-xnat",
-  "label": "HCP-XNAT",
-  "description": "Runs HCP pipelines on XNAT",
-  "version": "0.1",
+  "name": "run-hcp-xnat",
+  "label": "run-hcp-xnat",
+  "description": "Runs hcp qunex processing",
+  "version": "1.6",
   "schema-version": "1.0",
-  "info-url": "",
-  "image": "registry.nrg.wustl.edu/docker/nrg-repo/hcp-xnat:0.1",
+  "image": "registry.nrg.wustl.edu/docker/nrg-repo/run_hcp_xnat:0.16",
   "type": "docker",
-  "command-line": "#COMMAND# > /output/#OUTFILE#",
-  
+  "command-line": "/usr/local/bin/run_hcp_xnat #SESSION_LABEL# #T1W_SCAN_ID# #fMRI_SCAN1_ID#,#fMRI_SCAN2_ID# --scans_dir /input/SCANS --workdir /workdir --T2w #T2W_SCAN_ID# --fieldmap_mag #FIELDMAP_MAG_SCAN_ID# --fieldmap_ph #FIELDMAP_PHASE_SCAN_ID# --stage #STAGE# --xnat_input_dir 1",
+  "override-entrypoint": true,
   "mounts": [
     {
-      "name": "input",
+      "name": "in",
       "writable": false,
       "path": "/input"
     },
     {
-      "name": "output",
+      "name": "out",
       "writable": true,
-      "path": "/docker_mount"
+      "path": "/workdir"
     }
   ],
   "environment-variables": {},
   "ports": {},
   "inputs": [
     {
-      "name": "command",
-      "description": "The command to run",
+      "name": "SESSION_ID",
+      "label": null,
+      "description": "XNAT session ID",
       "type": "string",
-      "default-value": "echo hello world",
+      "matcher": null,
+      "default-value": null,
       "required": true,
-      "replacement-key": "#COMMAND#",
-      "select-values": []
+      "replacement-key": null,
+      "sensitive": null,
+      "command-line-flag": null,
+      "command-line-separator": null,
+      "true-value": null,
+      "false-value": null,
+      "select-values": [],
+      "multiple-delimiter": null
     },
     {
-      "name": "output-file",
-      "description": "Name of the file to collect stdout",
+      "name": "SESSION_LABEL",
+      "label": null,
+      "description": "XNAT session label",
       "type": "string",
-      "default-value": "out.txt",
-      "required": false,
-      "replacement-key": "#OUTFILE#",
-      "select-values": []
+      "matcher": null,
+      "default-value": null,
+      "required": true,
+      "replacement-key": null,
+      "sensitive": null,
+      "command-line-flag": null,
+      "command-line-separator": null,
+      "true-value": null,
+      "false-value": null,
+      "select-values": [],
+      "multiple-delimiter": null
     },
     {
       "name": "T1W_SCAN_ID",
@@ -77,9 +92,26 @@
       "multiple-delimiter": null
     },
     {
-      "name": "FIELDMAP_SCAN_ID",
+      "name": "FIELDMAP_MAG_SCAN_ID",
       "label": null,
-      "description": "Fieldmap scan ID",
+      "description": "Fieldmap magnitude scan ID",
+      "type": "string",
+      "matcher": null,
+      "default-value": null,
+      "required": true,
+      "replacement-key": null,
+      "sensitive": null,
+      "command-line-flag": null,
+      "command-line-separator": null,
+      "true-value": null,
+      "false-value": null,
+      "select-values": [],
+      "multiple-delimiter": null
+    },
+    {
+      "name": "FIELDMAP_PHASE_SCAN_ID",
+      "label": null,
+      "description": "Fieldmap phase scan ID",
       "type": "string",
       "matcher": null,
       "default-value": null,
@@ -128,29 +160,12 @@
       "multiple-delimiter": null
     },
     {
-      "name": "T1_SCAN_ID",
+      "name": "STAGE",
       "label": null,
-      "description": "T1 scan ID",
+      "description": "Run stage (1 or 2) [1]",
       "type": "string",
       "matcher": null,
-      "default-value": null,
-      "required": true,
-      "replacement-key": null,
-      "sensitive": null,
-      "command-line-flag": null,
-      "command-line-separator": null,
-      "true-value": null,
-      "false-value": null,
-      "select-values": [],
-      "multiple-delimiter": null
-    },
-    {
-      "name": "REGMASK_WHOLEHEAD",
-      "label": null,
-      "description": "reg_mask_whole_head (0 or 1, default is 0)",
-      "type": "string",
-      "matcher": null,
-      "default-value": "0",
+      "default-value": "1",
       "required": true,
       "replacement-key": null,
       "sensitive": null,
@@ -162,12 +177,21 @@
       "multiple-delimiter": null
     }
   ],
-  "outputs": [],
+  "outputs": [
+    {
+      "name": "output",
+      "description": "The command's stdout",
+      "required": true,
+      "mount": "out",
+      "path": null,
+      "glob": null
+    }
+  ],
   "xnat": [
     {
-      "name": "hcp-xnat",
-      "label": null,
-      "description": "Run hcp-xnat",
+      "name": "run-hcp-xnat-session",
+      "label": "Run HCP-XNAT",
+      "description": "Run the HCP QUNEX container with a session mounted",
       "contexts": [
         "xnat:imageSessionData"
       ],
@@ -183,13 +207,53 @@
           "replacement-key": null,
           "sensitive": null,
           "provides-value-for-command-input": null,
-          "provides-files-for-command-mount": "input",
+          "provides-files-for-command-mount": "in",
           "via-setup-command": null,
           "user-settable": null,
-          "load-children": true
+          "load-children": false
         }
       ],
       "derived-inputs": [
+        {
+          "name": "session-label",
+          "label": null,
+          "description": "Session label",
+          "type": "string",
+          "matcher": null,
+          "default-value": null,
+          "required": true,
+          "replacement-key": null,
+          "sensitive": null,
+          "provides-value-for-command-input": "SESSION_LABEL",
+          "provides-files-for-command-mount": null,
+          "user-settable": null,
+          "load-children": true,
+          "derived-from-wrapper-input": "session",
+          "derived-from-xnat-object-property": "label",
+          "via-setup-command": null,
+          "multiple": false,
+          "parser": null
+        },
+        {
+          "name": "session-id",
+          "label": null,
+          "description": "Session ID",
+          "type": "string",
+          "matcher": null,
+          "default-value": null,
+          "required": true,
+          "replacement-key": null,
+          "sensitive": null,
+          "provides-value-for-command-input": "SESSION_ID",
+          "provides-files-for-command-mount": null,
+          "user-settable": null,
+          "load-children": true,
+          "derived-from-wrapper-input": "session",
+          "derived-from-xnat-object-property": "id",
+          "via-setup-command": null,
+          "multiple": false,
+          "parser": null
+        },
         {
           "name": "t1w-scan",
           "label": null,
@@ -271,9 +335,9 @@
           "parser": null
         },
         {
-          "name": "fieldmap-scan",
+          "name": "fieldmap-mag-scan",
           "label": null,
-          "description": "fieldmap scan",
+          "description": "fieldmap magnitude scan",
           "type": "Scan",
           "matcher": null,
           "default-value": null,
@@ -291,20 +355,60 @@
           "parser": null
         },
         {
-          "name": "fieldmap-scan-id",
+          "name": "fieldmap-mag-scan-id",
           "label": null,
-          "description": "fieldmap scan ID",
+          "description": "fieldmap magnitude scan ID",
           "type": "string",
           "matcher": null,
           "default-value": null,
           "required": true,
           "replacement-key": null,
           "sensitive": null,
-          "provides-value-for-command-input": "FIELDMAP_SCAN_ID",
+          "provides-value-for-command-input": "FIELDMAP_MAG_SCAN_ID",
           "provides-files-for-command-mount": null,
           "user-settable": null,
           "load-children": true,
-          "derived-from-wrapper-input": "fieldmap-scan",
+          "derived-from-wrapper-input": "fieldmap-mag-scan",
+          "derived-from-xnat-object-property": "id",
+          "via-setup-command": null,
+          "multiple": false,
+          "parser": null
+        },
+        {
+          "name": "fieldmap-phase-scan",
+          "label": null,
+          "description": "fieldmap phase scan",
+          "type": "Scan",
+          "matcher": null,
+          "default-value": null,
+          "required": true,
+          "replacement-key": null,
+          "sensitive": null,
+          "provides-value-for-command-input": null,
+          "provides-files-for-command-mount": null,
+          "user-settable": null,
+          "load-children": true,
+          "derived-from-wrapper-input": "session",
+          "derived-from-xnat-object-property": null,
+          "via-setup-command": null,
+          "multiple": false,
+          "parser": null
+        },
+        {
+          "name": "fieldmap-phase-scan-id",
+          "label": null,
+          "description": "fieldmap phase scan ID",
+          "type": "string",
+          "matcher": null,
+          "default-value": null,
+          "required": true,
+          "replacement-key": null,
+          "sensitive": null,
+          "provides-value-for-command-input": "FIELDMAP_PHASE_SCAN_ID",
+          "provides-files-for-command-mount": null,
+          "user-settable": null,
+          "load-children": true,
+          "derived-from-wrapper-input": "fieldmap-phase-scan",
           "derived-from-xnat-object-property": "id",
           "via-setup-command": null,
           "multiple": false,
@@ -395,15 +499,18 @@
         {
           "name": "output-resource",
           "accepts-command-output": "output",
+          "via-wrapup-command": null,
           "as-a-child-of": "session",
           "type": "Resource",
-          "label": "HCP_OUT",
+          "label": "HCP_XNAT_OUTPUT",
+          "format": null,
+          "description": null,
+          "content": null,
           "tags": []
         }
       ]
     }
   ],
-  "reserve-memory": 12284,
   "container-labels": {},
   "generic-resources": {},
   "ulimits": {}
