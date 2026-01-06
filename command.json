@@ -1,10 +1,10 @@
 {
   "name": "run-hcp-xnat",
   "label": "run-hcp-xnat",
-  "description": "Runs hcp qunex processing",
-  "version": "1.6",
+  "description": "Runs HCP QUNEX processing",
+  "version": "0.17",
   "schema-version": "1.0",
-  "image": "registry.nrg.wustl.edu/docker/nrg-repo/run_hcp_xnat:0.16",
+  "image": "registry.nrg.wustl.edu/docker/nrg-repo/run_hcp_xnat:0.17",
   "type": "docker",
   "command-line": "/usr/local/bin/run_hcp_xnat #SESSION_LABEL# #T1W_SCAN_ID# #fMRI_SCAN1_ID#,#fMRI_SCAN2_ID# --scans_dir /input/SCANS --workdir /workdir --T2w #T2W_SCAN_ID# --fieldmap_mag #FIELDMAP_MAG_SCAN_ID# --fieldmap_ph #FIELDMAP_PHASE_SCAN_ID# --stage #STAGE# --xnat_input_dir 1",
   "override-entrypoint": true,
