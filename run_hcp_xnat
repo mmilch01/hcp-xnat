@@ -5,6 +5,39 @@ function exit_with_error
     echo "run_hcp_xnat ERROR: $1"; exit -1
 }
 
+resolve_symlinks() {
+  local dir="${1}"
+
+  # Find symlinks (do not follow) and process them safely with NUL delimiters.
+  find "$dir" -type l -print0 |
+  while IFS= read -r -d '' link; do
+    # Broken link? (-e follows symlink; false if target missing)
+    if [[ ! -e "$link" ]]; then
+      rm -f -- "$link"
+      continue
+    fi
+
+    # Resolve the ultimate target to an absolute path.
+    # readlink -f exists on GNU coreutils (Linux). If unavailable, this will fail.
+    local target
+    target="$(readlink -f -- "$link")" || continue
+
+    # If target is a directory, preserve semantics by replacing link with a real directory copy.
+    if [[ -d "$target" ]]; then
+      rm -f -- "$link" || continue
+      mkdir -p -- "$link" || continue
+      # Copy directory contents into the newly created directory.
+      cp -a -- "$target"/. "$link"/
+    else
+      # Regular file (or special): replace link with a real file.
+      # Copy to a temp file in the same directory, then atomically move into place.
+      local tmp
+      tmp="$(mktemp --tmpdir="$(dirname -- "$link")" ".resolve_symlinks.$(basename -- "$link").XXXXXX")" || continue
+      cp -a -- "$target" "$tmp" && mv -f -- "$tmp" "$link" || { rm -f -- "$tmp"; continue; }
+    fi
+  done
+}
+
 function print_usage
 {
     echo "run HCP pipelines in Qunex as a single, self-contained script, using XNAT data mount at experiment level"
@@ -74,7 +107,7 @@ echo "rerun: $rerun"
 
 if [ ! -d "$scans_dir" -a "$rerun" == "0" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided if rerun==0"; fi
 if [ ! -d "$workdir" ]; then exit_with_error "valid directory --workdir <path> must be provided"; fi
-if [ "$stage" != "1" -a "$stage" != "2" -a "$stage" != "DEBUG1"  -a "$stage" != "DEBUG2"  -a "$stage" != "DEBUG3" ]; then exit_with_error "--stage must be 1 or 2 or DEBUG1 or DEBUG2 or DEBUG3"; fi
+if [ "$stage" != "1" -a "$stage" != "2" -a "$stage" != "DEBUG1"  -a "$stage" != "DEBUG2" -a "$stage" != "DEBUG2.1" -a "$stage" != "DEBUG3" ]; then exit_with_error "--stage must be 1 or 2 or DEBUG1 or DEBUG2 or DEBUG3"; fi
 
 #mkdir -p $workdir/$session
 cd $workdir
@@ -121,6 +154,12 @@ if (( rerun == 0 )); then
 
     if [ "$stage" == "DEBUG2" ]; then
         echo "DEBUG2: copied scans"
+        exit 0
+    elif [ "$stage" == "DEBUG2.1" ]; then
+        echo "DEBUG2.1: created scans, created test symlink"
+        touch $workdir/test_file.txt
+        #this line is confirmed to fail resource upload.
+        ln -s $workdir/test_file.txt $workdir/test_file_symlink.txt
         exit 0
     fi
     echo "Importing DICOMs into HCP session"
@@ -172,10 +211,15 @@ if ((stage == 1)); then
     echo "Running ICA-FIX"
     $qunex_cmd hcp_icafix --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
 
+    echo "Resolving symlinks"
+    resolve_symlinks "$workdir"
+
 elif ((stage == 2)); then
     echo "Reapplying ICA-FIX"
     $qunex_cmd hcp_reapply_fix --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt"
     echo "Running MSMAll"
     $qunex_cmd hcp_msmall --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"  
+    echo "Resolving symlinks"
+    resolve_symlinks "$workdir"
 fi
 echo "Processing completed"
