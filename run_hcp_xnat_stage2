@@ -1,0 +1,67 @@
+#!/bin/bash
+
+HCP_XNAT_LIB="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$HCP_XNAT_LIB/hcp_xnat.shlib"
+
+function print_usage
+{
+    echo "run HCP pipelines in Qunex Stage 2 as a single, self-contained script, using XNAT data mount at experiment level"
+    echo "stage 2: reapply FIX, MSMAll"
+
+    echo "usage: run_hcp_xnat_stage2 --workdir <path> [options]"
+    echo "options:"
+    echo "  --workdir        <path>  processing directory"
+    echo "  --stage1_out_dir <path>  output directory of Stage 1 [/input]"    
+}
+
+source "/opt/qunex/env/qunex_environment.sh" &> /dev/null
+qunex_cmd="/opt/qunex/bin/qunex.sh"
+
+if [ "$#" -lt 2 ]; then
+    print_usage
+    exit 1
+fi
+
+args="$@"
+stage1_out_dir="/input"
+debug_stage=""
+
+while [ -n "$1" ]; do
+    echo input: $1
+    case $1 in
+        --workdir)          shift; workdir="$1"; shift;;
+        --stage1_out_dir)   shift; stage1_out_dir="$1"; shift;;
+        --debug_stage)      shift; debug_stage="$1"; shift ;;
+        --help) print_usage; exit 0;;
+        *)      exit_with_error "unrecognized option: $1";;
+    esac
+done
+
+if [ ! -d "$workdir" ]; then print_usage; exit_with_error "valid directory --workdir <path> must be provided"; fi
+if [ ! -d "$stage1_out_dir" ]; then print_usage; exit_with_error "valid directory ----stage1_out_dir <path> must be provided"; fi
+
+cd "$workdir"
+
+if [ "$debug_stage" == "DEBUG1" ]; then
+    echo "$args" > debug_args.txt
+    echo "DEBUG1: initialized variables"
+    exit 0
+fi
+
+#copy Stage 1 output to workdir
+echo "Copying Stage 1 output to working directory"
+cp -r "$stage1_out_dir"/* "$workdir"/
+
+echo "Running QuNex commands"
+#Run Stage 2
+sessionsfolder="$workdir/qunex/sessions"
+
+echo "Reapplying ICA-FIX"
+$qunex_cmd hcp_reapply_fix --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt"
+echo "Running MSMAll"
+$qunex_cmd hcp_msmall --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"  
+
+echo "Resolving symlinks"
+resolve_symlinks "$workdir"
+
+echo "Processing for HCP-XNAT Stage 2 completed"

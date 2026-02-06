@@ -1,0 +1,40 @@
+# helper functions for hcp_xnat stages.
+
+function exit_with_error
+{
+    echo "run_hcp_xnat ERROR: $1"; exit -1
+}
+
+resolve_symlinks() {
+  local dir="${1}"
+
+  # Find symlinks (do not follow) and process them safely with NUL delimiters.
+  find "$dir" -type l -print0 |
+  while IFS= read -r -d '' link; do
+    # Broken link? (-e follows symlink; false if target missing)
+    if [[ ! -e "$link" ]]; then
+      rm -f -- "$link"
+      continue
+    fi
+
+    # Resolve the ultimate target to an absolute path.
+    # readlink -f exists on GNU coreutils (Linux). If unavailable, this will fail.
+    local target
+    target="$(readlink -f -- "$link")" || continue
+
+    # If target is a directory, preserve semantics by replacing link with a real directory copy.
+    if [[ -d "$target" ]]; then
+      rm -f -- "$link" || continue
+      mkdir -p -- "$link" || continue
+      # Copy directory contents into the newly created directory.
+      cp -a -- "$target"/. "$link"/
+    else
+      # Regular file (or special): replace link with a real file.
+      # Copy to a temp file in the same directory, then atomically move into place.
+      local tmp
+      tmp="$(mktemp --tmpdir="$(dirname -- "$link")" ".resolve_symlinks.$(basename -- "$link").XXXXXX")" || continue
+      cp -a -- "$target" "$tmp" && mv -f -- "$tmp" "$link" || { rm -f -- "$tmp"; continue; }
+    fi
+  done
+}
+

@@ -1,0 +1,178 @@
+#!/bin/bash
+
+HCP_XNAT_LIB="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+#helper functions
+source "$HCP_XNAT_LIB/hcp_xnat.shlib"
+
+function print_usage
+{
+    echo "run HCP pipelines (Stage 1) in Qunex as a single, self-contained script, using XNAT data mount at experiment level"
+    echo "Stage 1 includes minimal structural and functional + ICA-FIX"
+    
+    echo "usage: run_hcp_xnat <session> <T1w scan> <BOLD scan>[,<BOLD scan>[,...]] <--scans_dir <path>>|<--setup-qunex 0> --workdir <path> [options]"
+    echo "options:"
+    echo "  --T2w           <scan_no>       T2w scan number" 
+    echo "  --fieldmap_mag  <scan_no>       [NONE] fieldmap magnitude scan number"
+    echo "  --fieldmap_ph   <scan_no>       [NONE] fieldmap phase scan number"
+    echo "  --scans_dir     <path>          input directory containing MRI scans"
+    echo "  --workdir       <path>          processing directory"
+    echo "  --setup-qunex   <0|1>           set to 1 to setup qunex directories (import DICOMs from --scans_dir, organize directories). Default: 1"
+    echo "  --xnat_input_dir <0|1>          set to 1 if input scans are in XNAT format (DICOMs in subfolders named by scan number). Default: 0"
+}
+
+source "/opt/qunex/env/qunex_environment.sh" &> /dev/null
+qunex_cmd="/opt/qunex/bin/qunex.sh"
+
+if [ "$#" -lt 7 ]; then
+    print_usage
+    exit 1
+fi
+
+session=$1; shift
+T1w=$1; shift
+
+IFS=',' read -r -a tt <<< "$1"; shift
+j=0
+fstda=()
+
+echo tt:${tt[*]}
+
+for i in "${!tt[@]}"; do 
+	if [ -n "${tt[i]}" ]; then 
+		fstda[j]=${tt[i]} 
+		j=$(( j+1 ))
+	fi
+	echo $i
+done
+
+
+if [[ ${#fstda[@]} -eq 0 ]]; then
+	exit_with_error "at least one BOLD scan number must be provided"
+fi
+
+debug_stage="NONE"
+setup_qunex=1
+xnat_input_dir=0
+args="$@"
+while [ -n "$1" ]; do
+    echo input: $1
+    case $1 in
+        --T2w)  shift; T2w=$1; shift;;
+        --fieldmap_mag) shift; fieldmap_mag="$1"; shift;;
+        --fieldmap_ph)  shift; fieldmap_ph="$1"; shift;;
+        --scans_dir)    shift; scans_dir="$1"; shift;;
+        --workdir)      shift; workdir="$1"; shift;;
+        --debug_stage)  shift; debug_stage="$1"; shift;;
+        --setup-qunex)	shift; setup_qunex="$1"; shift;;
+        --xnat_input_dir) shift; xnat_input_dir="$1"; shift;;
+        --help) print_usage; exit 0;;
+        *)      exit_with_error "unrecognized option: $1";;
+    esac
+done
+
+echo "setup_qunex: $setup_qunex"
+
+if [ ! -d "$scans_dir" -a "$setup_qunex" == "1" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided if setup_qunex==1"; fi
+if [ ! -d "$workdir" ]; then exit_with_error "valid directory --workdir <path> must be provided"; fi
+if [ "$debug_stage" != "NONE" -a "$debug_stage" != "DEBUG1"  -a "$debug_stage" != "DEBUG2" -a "$debug_stage" != "DEBUG2.1" -a "$debug_stage" != "DEBUG3" ]; then exit_with_error "--debug_stage must be DEBUG1 or DEBUG2 or DEBUG3"; fi
+
+#check fieldmap scans
+if [[ -z $fieldmap_mag || -z $fieldmap_ph || $fieldmap_mag == NONE || $fieldmap_ph == NONE ]]; then unset fieldmap_mag fieldmap_ph; fi
+
+#mkdir -p $workdir/$session
+cd "$workdir"
+
+if [ "$debug_stage" == "DEBUG1" ]; then
+    echo "$args" > debug_args.txt
+    echo "DEBUG1: initialized variables"
+    exit 0
+fi
+
+if [[ -z $fieldmap_mag || -z $fieldmap_ph ]]; then fieldmap_scans=""; else fieldmap_scans="$fieldmap_mag $fieldmap_ph"; fi
+scans=($T1w $T2w ${fstda[@]} $fieldmap_scans)
+sessionsfolder="$workdir/qunex/sessions"
+
+if (( setup_qunex == 1 )); then 
+
+    echo "Preparing Qunex study in $workdir/qunex for session $session"
+    $qunex_cmd create_study --studyfolder="$workdir/qunex"
+    echo "Linking scans from $scans_dir to session folder"
+
+    #files are copied, to avoid symlinks in container.
+    if (( xnat_input_dir == 1 )); then
+        mkdir -p "$sessionsfolder"/inbox/MR/$session
+        for scan in "${scans[@]}"; do
+            #copying individual scan folders
+            mkdir -p "$sessionsfolder"/inbox/MR/$session/$scan
+            cp -r "$scans_dir"/$scan/* "$sessionsfolder"/inbox/MR/$session/$scan/            
+        done
+        #remove catalog *.xml files from copied folders. If not done, this will break XNAT catalog generation. 
+        find "$sessionsfolder"/inbox/MR/$session/  -name '*.xml' -exec rm -f {} \; &> /dev/null
+
+    else #no downstream XNAT processing is expected
+        mkdir -p "$sessionsfolder"/inbox/MR
+        ln -s "$scans_dir" "$sessionsfolder"/inbox/MR/$session
+    fi
+
+    if [ "$debug_stage" == "DEBUG2" ]; then
+        echo "DEBUG2: copied scans"
+        exit 0
+    elif [ "$debug_stage" == "DEBUG2.1" ]; then
+        echo "DEBUG2.1: created scans, created test symlink"
+        touch "$workdir"/test_file.txt
+        #this line is confirmed to fail resource upload.
+        ln -s "$workdir"/test_file.txt "$workdir"/test_file_symlink.txt
+        exit 0
+    fi
+    echo "Importing DICOMs into HCP session"
+    "$qunex_cmd" import_dicom --sessionsfolder="$sessionsfolder" --add_json_info="all" --overwrite="yes"
+fi
+
+mapfile="$sessionsfolder"/specs/hcp_mapping.txt
+
+if [ "$debug_stage" == "DEBUG3" ]; then
+    echo "DEBUG3: Created directory structure, imported DICOMs, exiting before running HCP pipelines"
+    exit 0
+fi
+
+echo "${T1w}1 => T1w" > "$mapfile"
+if [ -n "${T2w:-}" ]; then echo "${T2w}1 => T2w" >> "$mapfile"; fi
+for i in ${!fstda[@]}; do echo "${fstda[i]}1 => bold:rest" >> "$mapfile"; done
+if [ -n "${fieldmap_mag}" ]; then echo "${fieldmap_mag}1 => FM-Magnitude" >> "$mapfile"; fi
+if [ -n "${fieldmap_ph}" ]; then echo "${fieldmap_ph}1 => FM-Phase" >> "$mapfile"; fi
+cat "$mapfile"
+
+echo "Creating session info"
+$qunex_cmd create_session_info --sessionsfolder="$sessionsfolder" --overwrite="yes"
+
+echo "Creating batch"
+$qunex_cmd create_batch --sessionsfolder="$sessionsfolder" --targetfile="$workdir/batch.txt" --overwrite="yes"
+
+echo "Creating HCP directory structure"
+$qunex_cmd setup_hcp --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt"
+
+echo "Running PreFreeSurfer"
+$qunex_cmd hcp_pre_freesurfer --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" \
+    --hcp_avgrdcmethod=NONE --hcp_seunwarpdir="NONE" --hcp_seechospacing="NONE"
+
+echo "Running FreeSurfer"
+$qunex_cmd hcp_freesurfer --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
+
+echo "Running PostFreeSurfer"
+$qunex_cmd hcp_post_freesurfer --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
+
+echo "Running fMRIVolume"
+$qunex_cmd hcp_fmri_volume --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" \
+    --hcp_bold_dcmethod="SiemensFieldMap"
+
+echo "Running fMRISurface"
+$qunex_cmd hcp_fmri_surface --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
+
+echo "Running ICA-FIX"
+$qunex_cmd hcp_icafix --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
+
+echo "Resolving symlinks"
+resolve_symlinks "$workdir"
+
+echo "Processing of HCP-XNAT Stage 1 completed"
