@@ -12,13 +12,14 @@ function print_usage
     
     echo "usage: run_hcp_xnat <session> <T1w scan> <BOLD scan>[,<BOLD scan>[,...]] <--scans_dir <path>>|<--setup-qunex 0> --workdir <path> [options]"
     echo "options:"
-    echo "  --T2w           <scan_no>       T2w scan number" 
-    echo "  --fieldmap_mag  <scan_no>       [NONE] fieldmap magnitude scan number"
-    echo "  --fieldmap_ph   <scan_no>       [NONE] fieldmap phase scan number"
-    echo "  --scans_dir     <path>          input directory containing MRI scans"
-    echo "  --workdir       <path>          processing directory"
-    echo "  --setup-qunex   <0|1>           set to 1 to setup qunex directories (import DICOMs from --scans_dir, organize directories). Default: 1"
-    echo "  --xnat_input_dir <0|1>          set to 1 if input scans are in XNAT format (DICOMs in subfolders named by scan number). Default: 0"
+    echo "  --T2w            <scan_no>       T2w scan number" 
+    echo "  --fieldmap_mag   <scan_no>       [NONE] fieldmap magnitude scan number"
+    echo "  --fieldmap_ph    <scan_no>       [NONE] fieldmap phase scan number"
+    echo "  --scans_dir      <path>          input directory containing MRI scans"
+    echo "  --workdir        <path>          processing directory"
+    echo "  --setup-qunex    <0|1>           set to 1 to setup qunex directories (import DICOMs from --scans_dir, organize directories). Default: 1"
+    echo "  --xnat_input_dir <0|1>           set to 1 if input scans are in XNAT format (DICOMs in subfolders named by scan number). Default: 0"
+    echo "  --dcmethod-siemens <0|1>           on-scanner BOLD correction [0] or Siemens [1] (default)"
 }
 
 source "/opt/qunex/env/qunex_environment.sh" &> /dev/null
@@ -55,6 +56,7 @@ debug_stage="NONE"
 setup_qunex=1
 xnat_input_dir=0
 args="$@"
+dcmethod=1
 while [ -n "$1" ]; do
     echo input: $1
     case $1 in
@@ -66,6 +68,7 @@ while [ -n "$1" ]; do
         --debug_stage)  shift; debug_stage="$1"; shift;;
         --setup-qunex)	shift; setup_qunex="$1"; shift;;
         --xnat_input_dir) shift; xnat_input_dir="$1"; shift;;
+        --dcmethod-siemens) shift; dcmethod="$1"; shift ;;
         --help) print_usage; exit 0;;
         *)      exit_with_error "unrecognized option: $1";;
     esac
@@ -76,6 +79,8 @@ echo "setup_qunex: $setup_qunex"
 if [ ! -d "$scans_dir" -a "$setup_qunex" == "1" ]; then exit_with_error "valid directory with --scans_dir <path> must be provided if setup_qunex==1"; fi
 if [ ! -d "$workdir" ]; then exit_with_error "valid directory --workdir <path> must be provided"; fi
 if [ "$debug_stage" != "NONE" -a "$debug_stage" != "DEBUG1"  -a "$debug_stage" != "DEBUG2" -a "$debug_stage" != "DEBUG2.1" -a "$debug_stage" != "DEBUG3" ]; then exit_with_error "--debug_stage must be DEBUG1 or DEBUG2 or DEBUG3"; fi
+
+if (( dcmethod != 0 && dcmethod != 1 )); then exit_with_error "--dcmethod-siemens must be 0 or 1"; fi 
 
 #check fieldmap scans
 if [[ -z $fieldmap_mag || -z $fieldmap_ph || $fieldmap_mag == NONE || $fieldmap_ph == NONE ]]; then unset fieldmap_mag fieldmap_ph; fi
@@ -163,8 +168,11 @@ echo "Running PostFreeSurfer"
 $qunex_cmd hcp_post_freesurfer --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
 
 echo "Running fMRIVolume"
+
+dcmethod_arg="SiemensFieldMap"
+if (( dcmethod == 0 )); then dcmethod_arg="OnScanner"; fi
 $qunex_cmd hcp_fmri_volume --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" \
-    --hcp_bold_dcmethod="SiemensFieldMap"
+    --hcp_bold_dcmethod="$dcmethod_arg"
 
 echo "Running fMRISurface"
 $qunex_cmd hcp_fmri_surface --sessionsfolder="$sessionsfolder" --batchfile="$workdir/batch.txt" --overwrite="yes"
