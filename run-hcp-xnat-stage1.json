@@ -2,11 +2,11 @@
   "name": "run-hcp-xnat stage 1",
   "label": "run-hcp-xnat stage 1",
   "description": "Runs HCP QUNEX processing Stage 1",
-  "version": "0.21",
+  "version": "0.22",
   "schema-version": "1.0",
   "image": "registry.nrg.wustl.edu/docker/nrg-repo/run_hcp_xnat:0.21",
   "type": "docker",
-  "command-line": "/usr/local/bin/run_hcp_xnat_stage1 #SESSION_LABEL# #T1W_SCAN_ID# #fMRI_SCAN1_ID#,#fMRI_SCAN2_ID# --scans_dir /input/SCANS --workdir /workdir --T2w #T2W_SCAN_ID# --fieldmap_mag #FIELDMAP_MAG_SCAN_ID# --fieldmap_ph #FIELDMAP_PHASE_SCAN_ID# --debug_stage #DEBUG_STAGE# --xnat_input_dir 1 --dcmethod-siemens #DCMETHOD_SIEMENS#",
+  "command-line": "/usr/local/bin/run_hcp_xnat_stage1 #SESSION_LABEL# #T1W_SCAN_ID# #fMRI_SCAN1_ID#,#fMRI_SCAN2_ID# --scans-dir /input/SCANS --workdir /workdir --T2w #T2W_SCAN_ID# --fieldmap-mag #FIELDMAP_MAG_SCAN_ID# --fieldmap-ph #FIELDMAP_PHASE_SCAN_ID# --debug-stage #DEBUG_STAGE# --xnat-input_dir 1 --dcmethod-siemens #DCMETHOD_SIEMENS#",
   "override-entrypoint": true,
   "mounts": [
     {
